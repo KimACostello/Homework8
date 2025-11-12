@@ -54,7 +54,10 @@ The following variables are provided:
 # Read in data
 bike_data <- read_csv("SeoulBikeData.csv", locale = locale(encoding = "latin1"))
 ```
+
 #### EDA
+
+Before we summarize the data, let's determine if the data set contains any missing values.
 
 ```{r}
 # check for missing values
@@ -63,9 +66,13 @@ colSums(is.na(bike_data))
 
 The data provided does not contain any missing values.
 
+The following contains the structure of the data set, so we can see the different variables and how they are being stored.
+
 ```{r}
 str(bike_data)
 ```
+
+Below is a summary of basic stats that can be used to make sure the data makes sense.
 
 ```{r}
 summary(bike_data)
@@ -76,6 +83,16 @@ unique(bike_data$Seasons)
 unique(bike_data$Holiday)
 unique(bike_data$`Functioning Day`)
 ```
+
+Unique values for Seasons are Winter, Spring, Summer, and Autumn. The holiday variable value for an observation is either No Holiday or Holiday. The Functioning Day is either Yes or No (Yes, it is during functional hours or No, it is not).
+
+Let's manipulate the data by:
+
+-   converting the date column to an actual date.
+
+-   turning the character variables into factors (for the different levels/categories).
+
+-   renaming all the variables to snake case.
 
 ```{r}
 bike_data <- bike_data |>
@@ -89,12 +106,16 @@ bike_data <- bike_data |>
   
 ```
 
+
+Let's see how many observations occurred in each season during functional or non-functional hours. And let's see how many observations occurred during a holiday vs no holiday during functional and non-functional hours. 
 ```{r}
 # Two-way contingency tables
 table(bike_data$functioning_day, bike_data$seasons)
 table(bike_data$functioning_day, bike_data$holiday)
 ```
+There are no observations in Summer and Winter that occurred during non-functional hours. Most observations are not on a holiday and during functional hours. 
 
+Let's look at the Mean and Median for all numeric variables during functional and non-functional hours.
 ```{r}
 bike_data |>
   group_by(functioning_day) |>
@@ -102,21 +123,24 @@ bike_data |>
                    list("mean" = mean, "median" = median), 
                    .names = "{.fn}_{.col}"))
 ```
+The mean and median rented bike counts are zero during non-functional hours. 
 
+To confirm there are no bikes being rented during non-functional hours, let's look at the min and max rental bike counts. 
 ```{r}
 bike_data |>
   group_by(functioning_day) |>
   summarize(min_bike_count = min(rented_bike_count), max_bike_count = max(rented_bike_count))
   
 ```
-
 No bikes were rented during non-functional hours.
 
+Since no bikes are being rented during non-functional hours, we can remove the observations that occurred during non-functional hours.  
 ```{r}
 fun_bike_data <- bike_data |>
   filter(functioning_day == "Yes")
 ```
 
+To simplify analysis, let's summarize across the hours so each day has one observation with it. This can be done by grouping by character variables, and summarizing (either sum or mean) across numeric variables.
 ```{r}
 bike_summary_data <- fun_bike_data |>
   group_by(date, seasons, holiday) |>
@@ -140,10 +164,11 @@ head(bike_summary_data)
     
 ```
 
+Now that non-functional hours have been removed from the data, let's see the number of observations that occurred on a holiday or no holiday by the season. 
 ```{r}
 table(bike_summary_data$seasons, bike_summary_data$holiday)
 ```
-
+Let's get the mean and median of numeric variables without the non-functional hours observations, by seasons. 
 ```{r}
 bike_summary_data |>
   group_by(seasons) |>
@@ -151,13 +176,17 @@ bike_summary_data |>
                    list("mean" = mean, "median" = median), 
                    .names = "{.fn}_{.col}"))
 ```
+Not surprisingly, the most bike rentals occurred during the Summer, then Autumn. 
 
+Let's see the min and max daily bike rentals by season. 
 ```{r}
 bike_summary_data |>
   group_by(seasons) |>
   summarize(min_bike_count = min(sum_bike_count), max_bike_count = max(sum_bike_count))
 ```
 
+
+Let's generate a correlation matrix plot, so we can see the relationships between the numeric variables.
 ```{r}
 df_corr <- bike_summary_data |>
   select(where(is.numeric)) |>
@@ -180,13 +209,19 @@ ggcorr(df_corr,
   labs(title = "Correlation Matrix of all Numeric Variables") +
   ggeasy::easy_center_title()
 ```
+When looking at daily bike rentals, temperature has the greatest positive correlation (the higher the temp, the higher the # of bike rentals). Humidity does not appear to have any relationship with bike rental counts.  
 
 ```{r}
 df_corr |>
   group_by(seasons) |>
   summarize(correlation = cor(Bike_count, Temperature, use = "pairwise.complete.obs"))
 ```
+When looking at the relationship between bike counts and temperature across seasons, it's surprising to see that summer has a slight negative correlation. Spring has a greater positive correlation between temperature and bike counts. 
 
+
+Let's see some plots to explore the data. 
+
+Scatterplot: 
 ```{r}
 g <- ggplot(data = bike_summary_data)
 
@@ -204,7 +239,9 @@ g + geom_point(aes(x = sum_bike_count,
   theme_dark() +
   ggeasy::easy_center_title() 
 ```
+In the plot above, you can see rental bike counts vs rainfall. The points are also color coded by season. Bike rentals are greater in the summer, but there are fewer observations during heavy rainfall. 
 
+Boxplot: 
 ```{r}
 g + geom_boxplot(aes(x = seasons, y = sum_bike_count, fill = holiday)) +
   labs(x = "Seasons", 
@@ -215,7 +252,9 @@ g + geom_boxplot(aes(x = seasons, y = sum_bike_count, fill = holiday)) +
   scale_fill_manual(values = c("lightpink",
                                "lightblue"))
 ```
+In the plot above, you can see that bike rental counts are greater in Summer and Autumn. Spring has a larger range of bike counts on a given day (greater distance between the min and max). 
 
+Scatterplot with a regression line:
 ```{r}
 ggplot(bike_summary_data, aes(x = date, y = sum_bike_count)) +
   geom_point() +
@@ -225,9 +264,11 @@ ggplot(bike_summary_data, aes(x = date, y = sum_bike_count)) +
   ggeasy::easy_center_title() +
   geom_smooth()
 ```
+In the plot above, you can see the trend of daily bike rentals by date, throughout 2018. Between June and July appear to have the most daily bike rentals, and January has the lowest. 
 
 #### Splitting the Data
 
+Split the data into training and test set. 
 ```{r}
 # Fix the random numbers by setting the seed 
 # This enables the analysis to be reproducible when random numbers are used 
@@ -240,6 +281,7 @@ train_data <- training(data_split)
 test_data  <- testing(data_split)
 ```
 
+On the training set, create a 10 fold cross validation split. 
 ```{r}
 # Create cross validation folds on the training data
 set.seed(234)
@@ -248,6 +290,7 @@ bike_folds <- vfold_cv(train_data, 10)
 
 #### Fitting MLR Models
 
+Let's create some recipes. 
 ```{r}
 recipe_one <- recipe(sum_bike_count ~ ., data = train_data) |> 
   update_role(date, new_role = "ID") |>
@@ -261,6 +304,7 @@ recipe_one <- recipe(sum_bike_count ~ ., data = train_data) |>
 ```
 
 ```{r}
+# Same as recipe one except including interactions.
 recipe_two <- recipe(sum_bike_count ~ ., data = train_data) |> 
   update_role(date, new_role = "ID") |>
   step_date(date, features = "dow") |>
@@ -277,6 +321,7 @@ recipe_two <- recipe(sum_bike_count ~ ., data = train_data) |>
 ```
 
 ```{r}
+# Same as recipe two except adding quadratic terms to numeric predictors.
 recipe_three <- recipe(sum_bike_count ~ ., data = train_data) |> 
   update_role(date, new_role = "ID") |>
   step_date(date, features = "dow") |>
@@ -292,11 +337,13 @@ recipe_three <- recipe(sum_bike_count ~ ., data = train_data) |>
 ```
 
 
+Now, let's set up our linear model fit to use the lm engine. 
 ```{r}
 bike_mod <- linear_reg() |>
   set_engine("lm")
 ```
 
+Combining recipes and model into workflows (for each recipe). 
 ```{r}
 workflow_one <- workflow() |>
   add_recipe(recipe_one) |>
@@ -312,7 +359,7 @@ workflow_three <- workflow() |>
 
 ```
 
-Fit the models using the 10 fold CV. 
+Fit the models using the 10 fold CV.
 ```{r}
 bike_CV_fit_one <- workflow_one |>
   fit_resamples(bike_folds)
@@ -340,8 +387,9 @@ bike_CV_fit_three |>
   collect_metrics()
 ```
 
-Model 3 is the best fit. 
+Model 3 is the best fit (lowest RMSE and highest RSQ).
 
+Using the "best" model, fit th emodel to the entire training data set. 
 ```{r}
 set.seed(123)
 best_fit <- 
@@ -352,7 +400,8 @@ best_fit |>
   collect_metrics()
 ```
 
-Make predictions on the test set and calculate RMSE. 
+Make predictions on the test set and calculate RMSE.
+
 ```{r}
 test_fit <- extract_workflow(best_fit)
 bike_predictions <- predict(test_fit, new_data = test_data) |>
@@ -364,11 +413,9 @@ RMSE_test <- bike_predictions |>
 RMSE_test
 ```
 
-
-
+Obtain the final model coefficient table. 
 ```{r}
 best_fit |>
   extract_fit_parsnip() |>
   tidy()
 ```
-
