@@ -15,6 +15,7 @@ library(janitor)
 library(dplyr)
 library(ggplot2)
 library(GGally)
+library(tidymodels)
 ```
 
 The following data set is provided by the UCI Machine Learning Repository. The data set contains count of public bicycles rented per hours in the Seoul Bike Sharing System, with corresponding weather data and holiday information.
@@ -226,3 +227,148 @@ ggplot(bike_summary_data, aes(x = date, y = sum_bike_count)) +
 ```
 
 #### Splitting the Data
+
+```{r}
+# Fix the random numbers by setting the seed 
+# This enables the analysis to be reproducible when random numbers are used 
+set.seed(123)
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(bike_summary_data, prop = 3/4, strata = seasons)
+
+# Create data frames for the two sets:
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+```
+
+```{r}
+# Create cross validation folds on the training data
+set.seed(234)
+bike_folds <- vfold_cv(train_data, 10)
+```
+
+#### Fitting MLR Models
+
+```{r}
+recipe_one <- recipe(sum_bike_count ~ ., data = train_data) |> 
+  update_role(date, new_role = "ID") |>
+  step_date(date, features = "dow") |>
+  step_mutate(day_of_week = 
+                as.factor(ifelse(date_dow %in% c("Sat", "Sun"), "weekend", "weekday"))) |>
+  step_rm(date_dow) |>     #removes intermediate variable
+  step_normalize(all_numeric(), -all_outcomes()) |>
+  step_dummy(seasons, holiday, day_of_week)
+
+```
+
+```{r}
+recipe_two <- recipe(sum_bike_count ~ ., data = train_data) |> 
+  update_role(date, new_role = "ID") |>
+  step_date(date, features = "dow") |>
+  step_mutate(day_of_week = 
+                as.factor(ifelse(date_dow %in% c("Sat", "Sun"), "weekend", "weekday"))) |>
+  step_rm(date_dow) |>     #removes intermediate variable
+  step_normalize(all_numeric(), -all_outcomes()) |>
+  step_dummy(seasons, holiday, day_of_week) |>
+  step_interact(terms = ~starts_with("holiday")*starts_with("seasons") +
+                  ~mean_temperature_c*starts_with("seasons") +
+                  ~mean_temperature_c*sum_rainfall)
+  
+
+```
+
+```{r}
+recipe_three <- recipe(sum_bike_count ~ ., data = train_data) |> 
+  update_role(date, new_role = "ID") |>
+  step_date(date, features = "dow") |>
+  step_mutate(day_of_week = 
+                as.factor(ifelse(date_dow %in% c("Sat", "Sun"), "weekend", "weekday"))) |>
+  step_rm(date_dow) |>     #removes intermediate variable
+  step_normalize(all_numeric(), -all_outcomes()) |>
+  step_dummy(seasons, holiday, day_of_week) |>
+  step_interact(terms = ~starts_with("holiday")*starts_with("seasons") +
+                  ~mean_temperature_c*starts_with("seasons") +
+                  ~mean_temperature_c*sum_rainfall) |>
+  step_poly(starts_with("mean"), sum_rainfall, sum_snowfall)
+```
+
+
+```{r}
+bike_mod <- linear_reg() |>
+  set_engine("lm")
+```
+
+```{r}
+workflow_one <- workflow() |>
+  add_recipe(recipe_one) |>
+  add_model(bike_mod)
+
+workflow_two <- workflow() |>
+  add_recipe(recipe_two) |>
+  add_model(bike_mod)
+
+workflow_three <- workflow() |>
+  add_recipe(recipe_three) |>
+  add_model(bike_mod)
+
+```
+
+Fit the models using the 10 fold CV. 
+```{r}
+bike_CV_fit_one <- workflow_one |>
+  fit_resamples(bike_folds)
+bike_CV_fit_one
+
+bike_CV_fit_one |>
+  collect_metrics()
+```
+
+```{r}
+bike_CV_fit_two <- workflow_two |>
+  fit_resamples(bike_folds)
+bike_CV_fit_two
+
+bike_CV_fit_two |>
+  collect_metrics()
+```
+
+```{r}
+bike_CV_fit_three <- workflow_three |>
+  fit_resamples(bike_folds)
+bike_CV_fit_three
+
+bike_CV_fit_three |>
+  collect_metrics()
+```
+
+Model 3 is the best fit. 
+
+```{r}
+set.seed(123)
+best_fit <- 
+  workflow_three |>
+  last_fit(data_split)
+
+best_fit |>
+  collect_metrics()
+```
+
+Make predictions on the test set and calculate RMSE. 
+```{r}
+test_fit <- extract_workflow(best_fit)
+bike_predictions <- predict(test_fit, new_data = test_data) |>
+  bind_cols(test_data |>
+              select(sum_bike_count))   #add the true values
+
+RMSE_test <- bike_predictions |>
+  rmse(truth = sum_bike_count, estimate = .pred)
+RMSE_test
+```
+
+
+
+```{r}
+best_fit |>
+  extract_fit_parsnip() |>
+  tidy()
+```
+
